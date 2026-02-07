@@ -93,6 +93,21 @@ def summarize_phase1_5_runs(run_outputs: List[Dict]) -> Dict[str, float]:
     }
 
 
+def summarize_learning_diagnostics(
+    run_outputs: List[Dict], metric_key: str = "b_kl_divergence"
+) -> Dict[str, float]:
+    """Summarize convergence diagnostics for a scalar per-episode metric."""
+    if not run_outputs:
+        return {"initial_metric": 0.0, "final_metric": 0.0, "delta_metric": 0.0}
+
+    values = [float(r.get(metric_key, 0.0)) for r in run_outputs]
+    return {
+        "initial_metric": values[0],
+        "final_metric": values[-1],
+        "delta_metric": values[-1] - values[0],
+    }
+
+
 def episodes_to_disambiguation(
     run_outputs: List[Dict], threshold: float = 0.5
 ) -> int:
@@ -156,3 +171,45 @@ def plot_phase1_5_entropy(
     plt.savefig(out_path)
     plt.close()
     return True
+
+
+def plot_learning_kl_over_episodes(
+    run_outputs: List[Dict], out_path: str, title: str, metric_key: str = "b_kl_divergence"
+) -> bool:
+    """Plot a scalar learning metric over episodes."""
+    try:
+        import matplotlib.pyplot as plt  # pylint: disable=import-outside-toplevel
+    except ModuleNotFoundError:
+        print(_MATPLOTLIB_MISSING_MSG)
+        return False
+
+    x = list(range(1, len(run_outputs) + 1))
+    y = [float(r.get(metric_key, 0.0)) for r in run_outputs]
+
+    plt.figure(figsize=(8, 4.5))
+    plt.plot(x, y, label=metric_key)
+    plt.xlabel("Episode")
+    plt.ylabel("Metric value")
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+    return True
+
+
+def exploratory_ratio_window(run_outputs: List[Dict], window_size: int = 5) -> Dict[str, float]:
+    """Return exploratory action ratio in early vs late windows."""
+    if not run_outputs:
+        return {"early_ratio": 0.0, "late_ratio": 0.0}
+
+    head = run_outputs[:window_size]
+    tail = run_outputs[-window_size:]
+
+    def _ratio(slice_runs: List[Dict]) -> float:
+        exploratory = sum(int(r.get("exploratory_actions", 0)) for r in slice_runs)
+        exploitative = sum(int(r.get("exploitative_actions", 0)) for r in slice_runs)
+        denom = exploratory + exploitative
+        return float(exploratory / denom) if denom > 0 else 0.0
+
+    return {"early_ratio": _ratio(head), "late_ratio": _ratio(tail)}

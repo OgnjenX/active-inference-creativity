@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, TypedDict
+from typing import Dict, List, Sequence, TypedDict
 
 import numpy as np
 
+from agent.generative_model import expected_b_from_alpha, init_dirichlet_from_b, kl_b_tensors
 from agent.inference_utils import (
     EfeTerms,
     expected_free_energy_terms,
@@ -64,14 +65,33 @@ class EpisodeResult(TypedDict):
     steps_to_success: int
     final_aff_belief: np.ndarray
     final_height_belief: np.ndarray
+    b_kl_divergence: float
 
 
 class ActiveInferenceAffordanceAgent:
     """Agent with explicit A/B/C/D and one-step EFE policy inference."""
 
-    def __init__(self, model: Dict[str, np.ndarray], policy_precision: float = 5.0):
+    def __init__(
+        self,
+        model: Dict[str, np.ndarray],
+        policy_precision: float = 5.0,
+        enable_parameter_learning: bool = False,
+        dirichlet_prior_strength: float = 8.0,
+        learn_action_ids: Sequence[int] = (1,),
+    ):
         self.model = model
         self.policy_precision = policy_precision
+        self.enable_parameter_learning = enable_parameter_learning
+        self.learn_action_ids = tuple(learn_action_ids)
+        self._b_height_true = self.model["B_height"].copy()
+        self._alpha_b_height: np.ndarray | None = None
+        if self.enable_parameter_learning:
+            self._alpha_b_height = init_dirichlet_from_b(
+                self._b_height_true,
+                prior_strength=dirichlet_prior_strength,
+            )
+            self.model["B_height"] = expected_b_from_alpha(self._alpha_b_height)
+
         self.q_height = self.model["D_height"].copy()
         self.q_aff = self.model["D_aff"].copy()
         self.reset_beliefs()
@@ -140,6 +160,30 @@ class ActiveInferenceAffordanceAgent:
         self.q_height = normalize(post["q_height"])
         self.q_aff = normalize(post["q_aff"])
 
+    def _update_b_dirichlet(
+        self,
+        action: int,
+        prior_height: np.ndarray,
+        posterior_height: np.ndarray,
+        prior_aff: np.ndarray,
+    ) -> None:
+        """Level 1 parameter learning for transition reliability."""
+
+        if not self.enable_parameter_learning or self._alpha_b_height is None:
+            return
+        if action not in self.learn_action_ids:
+            return
+
+        transition_counts = np.outer(posterior_height, prior_height)
+        for aff_idx, aff_weight in enumerate(prior_aff):
+            self._alpha_b_height[action, aff_idx] += aff_weight * transition_counts
+        self.model["B_height"] = expected_b_from_alpha(self._alpha_b_height)
+
+    def b_kl_divergence(self) -> float:
+        """KL divergence between current and ground-truth transition tensors."""
+
+        return kl_b_tensors(self._b_height_true, self.model["B_height"])
+
     def rollout_episode(
         self,
         world,
@@ -163,6 +207,12 @@ class ActiveInferenceAffordanceAgent:
                 obs_idx=obs_idx,
                 action=action,
                 prior_height=decision["prior_height"],
+                prior_aff=decision["prior_aff"],
+            )
+            self._update_b_dirichlet(
+                action=action,
+                prior_height=decision["prior_height"],
+                posterior_height=self.q_height,
                 prior_aff=decision["prior_aff"],
             )
 
@@ -196,4 +246,5 @@ class ActiveInferenceAffordanceAgent:
             "steps_to_success": success_step if success_step is not None else max_steps,
             "final_aff_belief": self.q_aff.copy(),
             "final_height_belief": self.q_height.copy(),
+            "b_kl_divergence": self.b_kl_divergence(),
         }

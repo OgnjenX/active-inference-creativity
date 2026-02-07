@@ -2,6 +2,21 @@
 
 A research sandbox for studying how affordance learning, transfer, and later creativity-like behavior can emerge from **active inference**.
 
+## Phases vs Levels (Important)
+
+This repository distinguishes between two orthogonal dimensions:
+
+- **Phases** describe the *task and environment structure* the agent is placed in.
+- **Levels** describe the *learning capability of the agent* given that task.
+
+Any Phase can be run at any Level.
+
+|            | Level 0: State Inference | Level 1: Parameter Learning |
+|------------|--------------------------|-----------------------------|
+| Phase 1    | ✅ supported              | ✅ supported                 |
+| Phase 1.5  | ✅ supported              | ✅ supported                 |
+
+
 ## Phase 1 Goal
 
 Phase 1 focuses on a minimal, interpretable setup where an agent:
@@ -17,6 +32,16 @@ Phase 1.5 extends the setup to two competing affordance hypotheses:
 - two objects are present and exactly one is climbable,
 - the agent must disambiguate which object affords climbing via epistemic action,
 - behavior should transition from uncertainty reduction to reliable exploitation.
+
+## Level 1: Parameter Learning
+
+Level 1 adds learning over transition reliability while keeping the affordance
+concept fixed.
+
+- learned: Dirichlet parameters over affordance-conditioned `B_height` dynamics
+- not learned: latent-state definitions, action space, observation model `A`, preferences `C`
+- interpretation: the agent learns how strongly climbability changes height, not
+  whether climbability exists as a concept
 
 ## Why This Is Active Inference (Not RL)
 
@@ -70,6 +95,12 @@ pip install -r requirements.txt
 python -m experiments.phase1_train
 ```
 
+Run with Level 1 parameter learning:
+
+```bash
+python -c "from experiments.phase1_train import run_training; run_training(enable_parameter_learning=True)"
+```
+
 Expected behavior:
 
 - early uncertainty over object affordance
@@ -92,6 +123,12 @@ Expected behavior:
 
 ```bash
 python -m experiments.phase1_5_train
+```
+
+Run with Level 1 parameter learning:
+
+```bash
+python -c "from experiments.phase1_5_train import run_phase1_5_training; run_phase1_5_training(enable_parameter_learning=True)"
 ```
 
 Expected behavior:
@@ -133,6 +170,8 @@ Scripts print per-episode summaries and save belief plots to:
 - `experiments/results/phase1_5_transfer_fresh_beliefs.png`
 - `experiments/results/phase1_5_transfer_transferred_entropy.png`
 - `experiments/results/phase1_5_transfer_fresh_entropy.png`
+- `experiments/results/phase1_train_level1_b_kl.png`
+- `experiments/results/phase1_5_train_level1_b_kl.png`
 
 ## Not in Phase 1
 

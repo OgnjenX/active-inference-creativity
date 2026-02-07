@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, TypedDict
+from typing import Dict, List, Sequence, TypedDict
 
 import numpy as np
 
+from agent.generative_model import expected_b_from_alpha, init_dirichlet_from_b, kl_b_tensors
 from agent.inference_utils import entropy
 from agent.inference_utils_phase1_5 import (
     EfeTermsTwoObject,
@@ -79,6 +80,7 @@ class EpisodeResultTwoObject(TypedDict):
     final_aff_1_belief: np.ndarray
     final_aff_2_belief: np.ndarray
     final_height_belief: np.ndarray
+    b_kl_divergence: float
 
 
 class ActiveInferenceDisambiguationAgent:
@@ -98,11 +100,24 @@ class ActiveInferenceDisambiguationAgent:
         policy_precision: float = 4.0,
         seed: int = 7,
         stochastic_action: bool = True,
+        enable_parameter_learning: bool = False,
+        dirichlet_prior_strength: float = 8.0,
+        learn_action_ids: Sequence[int] = (CLIMB_OBJECT_1, CLIMB_OBJECT_2),
     ):
         self.model = model
         self.policy_precision = policy_precision
         self.stochastic_action = stochastic_action
+        self.enable_parameter_learning = enable_parameter_learning
+        self.learn_action_ids = tuple(learn_action_ids)
         self.rng = np.random.default_rng(seed)
+        self._b_height_true = self.model["B_height"].copy()
+        self._alpha_b_height: np.ndarray | None = None
+        if self.enable_parameter_learning:
+            self._alpha_b_height = init_dirichlet_from_b(
+                self._b_height_true,
+                prior_strength=dirichlet_prior_strength,
+            )
+            self.model["B_height"] = expected_b_from_alpha(self._alpha_b_height)
 
         self.q_height = self.model["D_height"].copy()
         self.q_aff_1 = self.model["D_aff_1"].copy()
@@ -201,6 +216,34 @@ class ActiveInferenceDisambiguationAgent:
             return "exploitative"
         return "exploratory"
 
+    def _update_b_dirichlet(
+        self,
+        action: int,
+        prior_height: np.ndarray,
+        posterior_height: np.ndarray,
+        prior_aff_1: np.ndarray,
+        prior_aff_2: np.ndarray,
+    ) -> None:
+        """Update Dirichlet concentration over transition reliability."""
+
+        if not self.enable_parameter_learning or self._alpha_b_height is None:
+            return
+        if action not in self.learn_action_ids:
+            return
+
+        transition_counts = np.outer(posterior_height, prior_height)
+        for aff_1_idx, aff_1_weight in enumerate(prior_aff_1):
+            for aff_2_idx, aff_2_weight in enumerate(prior_aff_2):
+                self._alpha_b_height[action, aff_1_idx, aff_2_idx] += (
+                    aff_1_weight * aff_2_weight * transition_counts
+                )
+        self.model["B_height"] = expected_b_from_alpha(self._alpha_b_height)
+
+    def b_kl_divergence(self) -> float:
+        """KL divergence between current and ground-truth transition tensors."""
+
+        return kl_b_tensors(self._b_height_true, self.model["B_height"])
+
     def rollout_episode(
         self,
         world,
@@ -227,6 +270,13 @@ class ActiveInferenceDisambiguationAgent:
                 obs_idx=obs_idx,
                 action=action,
                 prior_height=decision["prior_height"],
+                prior_aff_1=decision["prior_aff_1"],
+                prior_aff_2=decision["prior_aff_2"],
+            )
+            self._update_b_dirichlet(
+                action=action,
+                prior_height=decision["prior_height"],
+                posterior_height=self.q_height,
                 prior_aff_1=decision["prior_aff_1"],
                 prior_aff_2=decision["prior_aff_2"],
             )
@@ -281,4 +331,5 @@ class ActiveInferenceDisambiguationAgent:
             "final_aff_1_belief": self.q_aff_1.copy(),
             "final_aff_2_belief": self.q_aff_2.copy(),
             "final_height_belief": self.q_height.copy(),
+            "b_kl_divergence": self.b_kl_divergence(),
         }

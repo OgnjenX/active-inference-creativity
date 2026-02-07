@@ -24,6 +24,18 @@ def _normalize(vec: np.ndarray) -> np.ndarray:
     return vec / s
 
 
+def _normalize_along_next_state(arr: np.ndarray) -> np.ndarray:
+    """Normalize transition probabilities along next-state axis.
+
+    Transition tensors in this project always use the last two axes as:
+    `(..., next_state, current_state)`.
+    """
+
+    denom = arr.sum(axis=-2, keepdims=True)
+    denom = np.where(denom <= 0.0, 1.0, denom)
+    return arr / denom
+
+
 def _build_observation_model() -> np.ndarray:
     """Observation model shared by Phase 1 and 1.5.
 
@@ -177,3 +189,35 @@ def build_phase1_5_model() -> dict:
         "D_aff_2": _normalize(d_aff_2),
         "obs_preferred_index": CAN_REACH_YES,
     }
+
+
+def init_dirichlet_from_b(
+    b_height: np.ndarray,
+    prior_strength: float = 8.0,
+) -> np.ndarray:
+    """Initialize Dirichlet concentration parameters from a transition tensor.
+
+    This is Level 1 learning: concept structure stays fixed, while transition
+    reliability is learned through concentration updates.
+    """
+
+    assert prior_strength > 0.0, "Dirichlet prior strength must be positive."
+    b_norm = _normalize_along_next_state(np.clip(b_height, 1e-12, None))
+    return prior_strength * b_norm
+
+
+def expected_b_from_alpha(alpha_height: np.ndarray) -> np.ndarray:
+    """Expected transition matrix under Dirichlet posterior."""
+
+    return _normalize_along_next_state(np.clip(alpha_height, 1e-12, None))
+
+
+def kl_b_tensors(p_height: np.ndarray, q_height: np.ndarray) -> float:
+    """Mean KL divergence KL(P||Q) across all transition columns."""
+
+    p = _normalize_along_next_state(np.clip(p_height, 1e-12, 1.0))
+    q = _normalize_along_next_state(np.clip(q_height, 1e-12, 1.0))
+    kl = p * (np.log(p) - np.log(q))
+    # Reduce over next-state axis, then average across remaining indices.
+    per_column = np.sum(kl, axis=-2)
+    return float(np.mean(per_column))
