@@ -10,6 +10,14 @@ Phase 1 focuses on a minimal, interpretable setup where an agent:
 - transfers that inferred affordance to a new object instance,
 - selects actions using expected free energy (not rewards).
 
+## Phase 1.5 Goal
+
+Phase 1.5 extends the setup to two competing affordance hypotheses:
+
+- two objects are present and exactly one is climbable,
+- the agent must disambiguate which object affords climbing via epistemic action,
+- behavior should transition from uncertainty reduction to reliable exploitation.
+
 ## Why This Is Active Inference (Not RL)
 
 This project does **not** use rewards, Q-values, policy gradients, or value functions.
@@ -26,6 +34,14 @@ Actions are chosen by minimizing expected free energy, which combines:
 
 - pragmatic value: expected alignment with preferred observations (`can_reach=yes`)
 - epistemic value: expected information gain about hidden causes (object affordance)
+
+## Modeling Assumptions
+
+- affordances are static latent causes in each episode/environment instance
+- the only action-controllable latent state is `agent_height_state`
+- observations remain outcome-only (`can_reach`), so object identity is never observed directly
+- Phase 1.5 worlds are instantiated with exactly one climbable object to force hypothesis disambiguation
+- identity-swap transfer is a stress test: prior beliefs may initially conflict with swapped dynamics
 
 ## Environment Design
 
@@ -72,6 +88,38 @@ Expected behavior:
 - fewer exploratory steps compared with a fresh baseline agent
 - successful reaching in the new object instance
 
+## Run Phase 1.5 Experiment 1 (Disambiguation Training)
+
+```bash
+python -m experiments.phase1_5_train
+```
+
+Expected behavior:
+
+- early probing of both climb actions while affordance beliefs are ambiguous,
+- decreasing affordance entropy over episodes,
+- convergence to the truly climbable object.
+
+## Run Phase 1.5 Experiment 2 (Transfer)
+
+```bash
+python -m experiments.phase1_5_transfer
+```
+
+Expected behavior:
+
+- transferred beliefs disambiguate object affordances faster than a fresh baseline,
+- clear epistemic-to-pragmatic transition in action patterns,
+- consistent successful reach once uncertainty is reduced.
+
+To test identity swap explicitly:
+
+```bash
+python -c "from experiments.phase1_5_transfer import run_phase1_5_transfer; run_phase1_5_transfer(swap_identities=True)"
+```
+
+In swap mode, slower adaptation than non-swap transfer is expected because carried priors can start anti-aligned with the new world.
+
 ## Outputs
 
 Scripts print per-episode summaries and save belief plots to:
@@ -79,6 +127,12 @@ Scripts print per-episode summaries and save belief plots to:
 - `experiments/results/phase1_train_beliefs.png`
 - `experiments/results/phase1_transfer_transferred_beliefs.png`
 - `experiments/results/phase1_transfer_fresh_beliefs.png`
+- `experiments/results/phase1_5_train_beliefs.png`
+- `experiments/results/phase1_5_train_entropy.png`
+- `experiments/results/phase1_5_transfer_transferred_beliefs.png`
+- `experiments/results/phase1_5_transfer_fresh_beliefs.png`
+- `experiments/results/phase1_5_transfer_transferred_entropy.png`
+- `experiments/results/phase1_5_transfer_fresh_entropy.png`
 
 ## Not in Phase 1
 

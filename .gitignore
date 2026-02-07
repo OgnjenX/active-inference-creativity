@@ -4,7 +4,7 @@ __pycache__/
 dist/
 build/
 *.log
-env/
+.env/
 .venv/
 .pytest_cache/
 *.sqlite3
