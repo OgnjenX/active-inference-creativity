@@ -81,6 +81,7 @@ class EpisodeResultTwoObject(TypedDict):
     final_aff_2_belief: np.ndarray
     final_height_belief: np.ndarray
     b_kl_divergence: float
+    b_target_distance: float | None
 
 
 class ActiveInferenceDisambiguationAgent:
@@ -332,4 +333,5 @@ class ActiveInferenceDisambiguationAgent:
             "final_aff_2_belief": self.q_aff_2.copy(),
             "final_height_belief": self.q_height.copy(),
             "b_kl_divergence": self.b_kl_divergence(),
+            "b_target_distance": None,
         }
