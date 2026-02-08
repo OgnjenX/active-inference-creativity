@@ -1,0 +1,36 @@
+{
+  "name": "phase2_unstructured_world",
+  "target_height": 1,
+  "resample_factors_independently_each_episode": true,
+  "independent_observation_channels": true,
+  "factor_tables": {
+    "height": {
+      "reach_prob_low": 0.2,
+      "reach_prob_high": 0.8
+    },
+    "stability": {
+      "stability_low": 0.2,
+      "stability_high": 0.8
+    },
+    "stackability": {
+      "stackability_low": 0.3,
+      "stackability_high": 0.85
+    }
+  },
+  "objects": [
+    {
+      "object_id": 1,
+      "name": "object_sigma",
+      "height_factor": "reach_prob_low",
+      "stability_factor": "stability_low",
+      "stackability_factor": "stackability_low"
+    },
+    {
+      "object_id": 2,
+      "name": "object_tau",
+      "height_factor": "reach_prob_high",
+      "stability_factor": "stability_high",
+      "stackability_factor": "stackability_high"
+    }
+  ]
+}

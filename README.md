@@ -16,6 +16,9 @@ Any Phase can be run at any Level.
 | Phase 1    | ✅ supported              | ✅ supported                 |
 | Phase 1.5  | ✅ supported              | ✅ supported                 |
 
+Phase 2 introduces **Level 2: structure learning** (model comparison) in
+parallel scripts without changing Phase 1/1.5 behavior.
+
 
 ## Phase 1 Goal
 
@@ -42,6 +45,21 @@ concept fixed.
 - not learned: latent-state definitions, action space, observation model `A`, preferences `C`
 - interpretation: the agent learns how strongly climbability changes height, not
   whether climbability exists as a concept
+
+## Level 2: Structure Learning (Concept Learning)
+
+Level 2 adds model-family comparison instead of tuning a fixed model:
+
+- **Family A (flat / object-specific)**: predicts outcomes per object identity with no shared latent factor.
+- **Family B (factorized / conceptual)**: introduces a shared latent factor that explains outcomes across objects.
+
+The agent runs inference under both families, accumulates variational free energy
+(approximate model evidence), and updates posterior preference over model
+families over time.
+
+Important scope note:
+- this phase supports **concept selection via structure learning** among
+  predefined model families; it does not implement unconstrained concept invention.
 
 ## Why This Is Active Inference (Not RL)
 
@@ -75,6 +93,9 @@ The environment is deterministic and object-based, with strict separation of con
 - environment internal state includes object height and agent height
 - agent never sees heights or affordance flags
 - exposed observation is only `can_reach in {yes, no}`
+
+Phase 2 keeps observations outcome-only and intervention-based actions while
+removing explicit affordance labels from both environment and agent.
 
 ## Project Layout
 
@@ -157,6 +178,55 @@ python -c "from experiments.phase1_5_transfer import run_phase1_5_transfer; run_
 
 In swap mode, slower adaptation than non-swap transfer is expected because carried priors can start anti-aligned with the new world.
 
+## Run Phase 2 Stage A Demo (Environment Only)
+
+```bash
+python3 -m experiments.phase2_env_demo
+```
+
+This validates JSON-loaded worlds with hidden primitive properties
+(`height_delta`, `stability`, `stackability`) and outcome generation.
+
+## Run Phase 2 Stage B (Level 2 Model Comparison Training)
+
+```bash
+python3 -m experiments.phase2_train_structure
+```
+
+Expected diagnostics:
+
+- cumulative model evidence (`free energy`) curves for flat vs factorized families,
+- normalized evidence (`mean free energy per step`) to account for variable episode length,
+- explicit complexity (`Occam`) term per family and combined score = free energy + complexity,
+- posterior preference over model families across episodes,
+- selected family controlling EFE-based action choice.
+
+Current Level 2 control detail:
+- action selection uses hard model selection (MAP family) at each step;
+  soft uncertainty-weighted model averaging is left for later extension.
+
+## Run Phase 2 Stage B Transfer
+
+```bash
+python3 -m experiments.phase2_transfer
+```
+
+Expected behavior:
+
+- transferred structure state yields fewer steps-to-success than a fresh baseline,
+- model-family posterior adapts when moving to a new world instance.
+
+## Run Phase 2 Model-Selection Sanity Check
+
+```bash
+python3 -m experiments.phase2_model_selection_sanity
+```
+
+This compares model preference across:
+
+- structured world with reusable latent-factor structure (factorized should win),
+- unstructured world with independent channel generation (flat should win).
+
 ## Outputs
 
 Scripts print per-episode summaries and save belief plots to:
@@ -172,6 +242,14 @@ Scripts print per-episode summaries and save belief plots to:
 - `experiments/results/phase1_5_transfer_fresh_entropy.png`
 - `experiments/results/phase1_train_level1_b_kl.png`
 - `experiments/results/phase1_5_train_level1_b_kl.png`
+- `experiments/results/phase2_train_model_evidence.png`
+- `experiments/results/phase2_train_model_evidence_per_step.png`
+- `experiments/results/phase2_train_model_posterior.png`
+- `experiments/results/phase2_transfer_steps.png`
+- `experiments/results/phase2_transfer_transferred_posterior.png`
+- `experiments/results/phase2_transfer_fresh_posterior.png`
+- `experiments/results/phase2_structured_model_posterior.png`
+- `experiments/results/phase2_unstructured_model_posterior.png`
 
 ## Not in Phase 1
 

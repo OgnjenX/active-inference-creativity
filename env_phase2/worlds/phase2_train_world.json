@@ -1,0 +1,35 @@
+{
+  "name": "phase2_train_world",
+  "target_height": 1,
+  "factor_tables": {
+    "height": {
+      "height_low": 0,
+      "height_high": 1
+    },
+    "stability": {
+      "stability_low": 0.3,
+      "stability_high": 0.9
+    },
+    "stackability": {
+      "stackability_low": 0.4,
+      "stackability_high": 0.8
+    }
+  },
+  "objects": [
+    {
+      "object_id": 1,
+      "name": "object_alpha",
+      "height_factor": "height_high",
+      "stability_factor": "stability_high",
+      "stackability_factor": "stackability_high"
+    },
+    {
+      "object_id": 2,
+      "name": "object_beta",
+      "height_factor": "height_low",
+      "stability_factor": "stability_low",
+      "stackability_factor": "stackability_low"
+    }
+  ],
+  "resample_assignment_each_episode": true
+}

@@ -213,3 +213,173 @@ def exploratory_ratio_window(run_outputs: List[Dict], window_size: int = 5) -> D
         return float(exploratory / denom) if denom > 0 else 0.0
 
     return {"early_ratio": _ratio(head), "late_ratio": _ratio(tail)}
+
+
+def summarize_phase2_runs(run_outputs: List[Dict]) -> Dict[str, float]:
+    """Compute aggregate metrics for Phase 2 + Level 2 experiments."""
+    if not run_outputs:
+        return {
+            "success_rate": 0.0,
+            "avg_steps_to_success": 0.0,
+            "avg_final_p_flat": 0.0,
+            "avg_final_p_factorized": 0.0,
+            "avg_final_cum_fe_flat": 0.0,
+            "avg_final_cum_fe_factorized": 0.0,
+            "avg_episode_fe_flat": 0.0,
+            "avg_episode_fe_factorized": 0.0,
+            "avg_episode_fe_per_step_flat": 0.0,
+            "avg_episode_fe_per_step_factorized": 0.0,
+            "avg_final_complexity_flat": 0.0,
+            "avg_final_complexity_factorized": 0.0,
+            "avg_final_score_flat": 0.0,
+            "avg_final_score_factorized": 0.0,
+            "factorized_selected_rate": 0.0,
+        }
+
+    success_rate = sum(1 for r in run_outputs if r["success"]) / max(len(run_outputs), 1)
+    avg_steps = mean(r["steps_to_success"] for r in run_outputs)
+    avg_p_flat = mean(float(r["model_posterior_final"][0]) for r in run_outputs)
+    avg_p_factor = mean(float(r["model_posterior_final"][1]) for r in run_outputs)
+    avg_fe_flat = mean(float(r["cumulative_fe_flat"]) for r in run_outputs)
+    avg_fe_factor = mean(float(r["cumulative_fe_factorized"]) for r in run_outputs)
+    episode_fe_flat = [
+        float(sum(getattr(log, "fe_inc_flat", 0.0) for log in r.get("logs", []))) for r in run_outputs
+    ]
+    episode_fe_factor = [
+        float(sum(getattr(log, "fe_inc_factorized", 0.0) for log in r.get("logs", []))) for r in run_outputs
+    ]
+    episode_steps = [max(len(r.get("logs", [])), 1) for r in run_outputs]
+    episode_fe_rate_flat = [episode_fe_flat[i] / episode_steps[i] for i in range(len(run_outputs))]
+    episode_fe_rate_factor = [episode_fe_factor[i] / episode_steps[i] for i in range(len(run_outputs))]
+    avg_complexity_flat = mean(float(r.get("complexity_flat", 0.0)) for r in run_outputs)
+    avg_complexity_factor = mean(float(r.get("complexity_factorized", 0.0)) for r in run_outputs)
+    factorized_selected = sum(1 for r in run_outputs if r["selected_family_final"] == "factorized")
+    factorized_selected_rate = factorized_selected / max(len(run_outputs), 1)
+
+    return {
+        "success_rate": success_rate,
+        "avg_steps_to_success": avg_steps,
+        "avg_final_p_flat": avg_p_flat,
+        "avg_final_p_factorized": avg_p_factor,
+        "avg_final_cum_fe_flat": avg_fe_flat,
+        "avg_final_cum_fe_factorized": avg_fe_factor,
+        "avg_episode_fe_flat": mean(episode_fe_flat),
+        "avg_episode_fe_factorized": mean(episode_fe_factor),
+        "avg_episode_fe_per_step_flat": mean(episode_fe_rate_flat),
+        "avg_episode_fe_per_step_factorized": mean(episode_fe_rate_factor),
+        "avg_final_complexity_flat": avg_complexity_flat,
+        "avg_final_complexity_factorized": avg_complexity_factor,
+        "avg_final_score_flat": avg_fe_flat + avg_complexity_flat,
+        "avg_final_score_factorized": avg_fe_factor + avg_complexity_factor,
+        "factorized_selected_rate": factorized_selected_rate,
+    }
+
+
+def plot_phase2_model_evidence(run_outputs: List[Dict], out_path: str, title: str) -> bool:
+    """Plot cumulative free energy trajectories by model family."""
+    try:
+        import matplotlib.pyplot as plt  # pylint: disable=import-outside-toplevel
+    except ModuleNotFoundError:
+        print(_MATPLOTLIB_MISSING_MSG)
+        return False
+
+    x = list(range(1, len(run_outputs) + 1))
+    fe_flat = [float(r["cumulative_fe_flat"]) for r in run_outputs]
+    fe_factor = [float(r["cumulative_fe_factorized"]) for r in run_outputs]
+
+    plt.figure(figsize=(8, 4.5))
+    plt.plot(x, fe_flat, label="flat cumulative free energy")
+    plt.plot(x, fe_factor, label="factorized cumulative free energy")
+    plt.xlabel("Episode")
+    plt.ylabel("Cumulative free energy (lower is better)")
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+    return True
+
+
+def plot_phase2_model_evidence_per_step(run_outputs: List[Dict], out_path: str, title: str) -> bool:
+    """Plot per-episode free-energy rate (mean FE per step) by model family."""
+    try:
+        import matplotlib.pyplot as plt  # pylint: disable=import-outside-toplevel
+    except ModuleNotFoundError:
+        print(_MATPLOTLIB_MISSING_MSG)
+        return False
+
+    x = list(range(1, len(run_outputs) + 1))
+    y_flat = []
+    y_factor = []
+    for run in run_outputs:
+        logs = run.get("logs", [])
+        n_steps = max(len(logs), 1)
+        fe_flat = float(sum(getattr(log, "fe_inc_flat", 0.0) for log in logs))
+        fe_factor = float(sum(getattr(log, "fe_inc_factorized", 0.0) for log in logs))
+        y_flat.append(fe_flat / n_steps)
+        y_factor.append(fe_factor / n_steps)
+
+    plt.figure(figsize=(8, 4.5))
+    plt.plot(x, y_flat, label="flat mean FE per step")
+    plt.plot(x, y_factor, label="factorized mean FE per step")
+    plt.xlabel("Episode")
+    plt.ylabel("Mean free energy per step (lower is better)")
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+    return True
+
+
+def plot_phase2_model_posterior(run_outputs: List[Dict], out_path: str, title: str) -> bool:
+    """Plot posterior preference over model families by episode."""
+    try:
+        import matplotlib.pyplot as plt  # pylint: disable=import-outside-toplevel
+    except ModuleNotFoundError:
+        print(_MATPLOTLIB_MISSING_MSG)
+        return False
+
+    x = list(range(1, len(run_outputs) + 1))
+    p_flat = [float(r["model_posterior_final"][0]) for r in run_outputs]
+    p_factor = [float(r["model_posterior_final"][1]) for r in run_outputs]
+
+    plt.figure(figsize=(8, 4.5))
+    plt.plot(x, p_flat, label="P(flat)")
+    plt.plot(x, p_factor, label="P(factorized)")
+    plt.xlabel("Episode")
+    plt.ylabel("Posterior probability")
+    plt.ylim(0.0, 1.0)
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+    return True
+
+
+def plot_phase2_transfer_steps(
+    transferred_runs: List[Dict], fresh_runs: List[Dict], out_path: str, title: str
+) -> bool:
+    """Plot steps-to-success for transferred vs fresh agents."""
+    try:
+        import matplotlib.pyplot as plt  # pylint: disable=import-outside-toplevel
+    except ModuleNotFoundError:
+        print(_MATPLOTLIB_MISSING_MSG)
+        return False
+
+    x = list(range(1, max(len(transferred_runs), len(fresh_runs)) + 1))
+    y_transferred = [float(r["steps_to_success"]) for r in transferred_runs]
+    y_fresh = [float(r["steps_to_success"]) for r in fresh_runs]
+
+    plt.figure(figsize=(8, 4.5))
+    plt.plot(x[: len(y_transferred)], y_transferred, label="transferred")
+    plt.plot(x[: len(y_fresh)], y_fresh, label="fresh")
+    plt.xlabel("Episode")
+    plt.ylabel("Steps to success")
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+    return True
