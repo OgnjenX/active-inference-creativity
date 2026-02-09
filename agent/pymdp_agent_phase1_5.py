@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Sequence, TypedDict
+from typing import Any, Dict, List, Sequence, TypedDict
 
 import numpy as np
 
@@ -82,6 +82,7 @@ class EpisodeResultTwoObject(TypedDict):
     final_height_belief: np.ndarray
     b_kl_divergence: float
     b_target_distance: float | None
+    trace: List[Dict[str, Any]]
 
 
 class ActiveInferenceDisambiguationAgent:
@@ -245,11 +246,103 @@ class ActiveInferenceDisambiguationAgent:
 
         return kl_b_tensors(self._b_height_true, self.model["B_height"])
 
+    def _create_step_log(
+        self, step_idx: int, action: int, obs_idx: int, decision: ActDecisionTwoObject
+    ) -> StepLogTwoObject:
+        """Create log entry for a single step."""
+        terms = decision["efe_terms"]
+        mode = self._mode_for_action(action)
+        return StepLogTwoObject(
+            step=step_idx,
+            action=PHASE1_5_ACTION_NAMES[action],
+            can_reach_obs="yes" if obs_idx == 1 else "no",
+            q_height_low=float(self.q_height[0]),
+            q_height_high=float(self.q_height[1]),
+            q_aff_1_unknown=float(self.q_aff_1[0]),
+            q_aff_1_climbable=float(self.q_aff_1[1]),
+            q_aff_1_not_climbable=float(self.q_aff_1[2]),
+            q_aff_2_unknown=float(self.q_aff_2[0]),
+            q_aff_2_climbable=float(self.q_aff_2[1]),
+            q_aff_2_not_climbable=float(self.q_aff_2[2]),
+            affordance_entropy_total=float(entropy(self.q_aff_1) + entropy(self.q_aff_2)),
+            q_pi_do_nothing=float(decision["q_pi"][0]),
+            q_pi_climb_object_1=float(decision["q_pi"][1]),
+            q_pi_climb_object_2=float(decision["q_pi"][2]),
+            g_do_nothing=float(terms[0]["G"]),
+            g_climb_object_1=float(terms[1]["G"]),
+            g_climb_object_2=float(terms[2]["G"]),
+            pragmatic_do_nothing=float(terms[0]["pragmatic"]),
+            pragmatic_climb_object_1=float(terms[1]["pragmatic"]),
+            pragmatic_climb_object_2=float(terms[2]["pragmatic"]),
+            epistemic_do_nothing=float(terms[0]["epistemic"]),
+            epistemic_climb_object_1=float(terms[1]["epistemic"]),
+            epistemic_climb_object_2=float(terms[2]["epistemic"]),
+            mode=mode,
+        )
+
+    def _create_trace_entry(
+        self,
+        step_idx: int,
+        action: int,
+        obs_idx: int,
+        decision: ActDecisionTwoObject,
+        info: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Create trace entry for a single step."""
+        terms = decision["efe_terms"]
+        b_obj1 = np.zeros((2, 2), dtype=float)
+        b_obj2 = np.zeros((2, 2), dtype=float)
+        for aff_1_idx, aff_1_prob in enumerate(decision["prior_aff_1"]):
+            for aff_2_idx, aff_2_prob in enumerate(decision["prior_aff_2"]):
+                weight = float(aff_1_prob * aff_2_prob)
+                b_obj1 += weight * self.model["B_height"][CLIMB_OBJECT_1, aff_1_idx, aff_2_idx]
+                b_obj2 += weight * self.model["B_height"][CLIMB_OBJECT_2, aff_1_idx, aff_2_idx]
+        g_vec = np.array([terms[0]["G"], terms[1]["G"], terms[2]["G"]], dtype=float)
+        g_order = np.argsort(g_vec)
+        selected_action_rank = int(np.nonzero(g_order == action)[0][0]) + 1
+        runner_up_idx = int(g_order[1]) if len(g_order) > 1 else int(g_order[0])
+        delta_g_to_runner_up = float(g_vec[runner_up_idx] - g_vec[action])
+
+        return {
+            "t": int(step_idx),
+            "action": PHASE1_5_ACTION_NAMES[action],
+            "chosen_action": int(action),
+            "selected_action_rank": selected_action_rank,
+            "delta_G_to_runner_up": delta_g_to_runner_up,
+            "observation": "yes" if obs_idx == 1 else "no",
+            "observation_idx": int(obs_idx),
+            "q_height": self.q_height.copy(),
+            "q_aff_1": self.q_aff_1.copy(),
+            "q_aff_2": self.q_aff_2.copy(),
+            "entropy_aff_total": float(entropy(self.q_aff_1) + entropy(self.q_aff_2)),
+            "efe_per_action": np.array([terms[0]["G"], terms[1]["G"], terms[2]["G"]], dtype=float),
+            "pragmatic_per_action": np.array(
+                [terms[0]["pragmatic"], terms[1]["pragmatic"], terms[2]["pragmatic"]],
+                dtype=float,
+            ),
+            "epistemic_per_action": np.array(
+                [terms[0]["epistemic"], terms[1]["epistemic"], terms[2]["epistemic"]],
+                dtype=float,
+            ),
+            "q_pi": decision["q_pi"].copy(),
+            "A": self.model["A"].copy(),
+            "B_height_relevant": {
+                "climb_object_1_expected": b_obj1.copy(),
+                "climb_object_2_expected": b_obj2.copy(),
+            },
+            "C": self.model["C"].copy(),
+            "D_height": self.model["D_height"].copy(),
+            "D_aff_1": self.model["D_aff_1"].copy(),
+            "D_aff_2": self.model["D_aff_2"].copy(),
+            "world_info": dict(info),
+        }
+
     def rollout_episode(
         self,
         world,
         max_steps: int = 12,
         carry_affordance_belief: bool = True,
+        enable_trace: bool = False,
     ) -> EpisodeResultTwoObject:
         """Run one full episode and return logs and summary statistics."""
 
@@ -257,6 +350,7 @@ class ActiveInferenceDisambiguationAgent:
         world.reset()
 
         logs: List[StepLogTwoObject] = []
+        trace: List[Dict[str, Any]] = []
         success_step = None
         exploratory_actions = 0
         exploitative_actions = 0
@@ -265,7 +359,7 @@ class ActiveInferenceDisambiguationAgent:
             decision = self.act()
             action = int(decision["action"])
 
-            next_obs, done, _ = world.step(action)
+            next_obs, done, info = world.step(action)
             obs_idx = int(next_obs["can_reach"])
             self.update(
                 obs_idx=obs_idx,
@@ -288,36 +382,10 @@ class ActiveInferenceDisambiguationAgent:
             if mode == "exploitative":
                 exploitative_actions += 1
 
-            terms = decision["efe_terms"]
-            logs.append(
-                StepLogTwoObject(
-                    step=step_idx,
-                    action=PHASE1_5_ACTION_NAMES[action],
-                    can_reach_obs="yes" if obs_idx == 1 else "no",
-                    q_height_low=float(self.q_height[0]),
-                    q_height_high=float(self.q_height[1]),
-                    q_aff_1_unknown=float(self.q_aff_1[0]),
-                    q_aff_1_climbable=float(self.q_aff_1[1]),
-                    q_aff_1_not_climbable=float(self.q_aff_1[2]),
-                    q_aff_2_unknown=float(self.q_aff_2[0]),
-                    q_aff_2_climbable=float(self.q_aff_2[1]),
-                    q_aff_2_not_climbable=float(self.q_aff_2[2]),
-                    affordance_entropy_total=float(entropy(self.q_aff_1) + entropy(self.q_aff_2)),
-                    q_pi_do_nothing=float(decision["q_pi"][0]),
-                    q_pi_climb_object_1=float(decision["q_pi"][1]),
-                    q_pi_climb_object_2=float(decision["q_pi"][2]),
-                    g_do_nothing=float(terms[0]["G"]),
-                    g_climb_object_1=float(terms[1]["G"]),
-                    g_climb_object_2=float(terms[2]["G"]),
-                    pragmatic_do_nothing=float(terms[0]["pragmatic"]),
-                    pragmatic_climb_object_1=float(terms[1]["pragmatic"]),
-                    pragmatic_climb_object_2=float(terms[2]["pragmatic"]),
-                    epistemic_do_nothing=float(terms[0]["epistemic"]),
-                    epistemic_climb_object_1=float(terms[1]["epistemic"]),
-                    epistemic_climb_object_2=float(terms[2]["epistemic"]),
-                    mode=mode,
-                )
-            )
+            logs.append(self._create_step_log(step_idx, action, obs_idx, decision))
+
+            if enable_trace:
+                trace.append(self._create_trace_entry(step_idx, action, obs_idx, decision, info))
 
             if done:
                 success_step = step_idx + 1
@@ -334,4 +402,5 @@ class ActiveInferenceDisambiguationAgent:
             "final_height_belief": self.q_height.copy(),
             "b_kl_divergence": self.b_kl_divergence(),
             "b_target_distance": None,
+            "trace": trace,
         }

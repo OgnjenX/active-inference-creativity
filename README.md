@@ -227,6 +227,19 @@ This compares model preference across:
 - structured world with reusable latent-factor structure (factorized should win),
 - unstructured world with independent channel generation (flat should win).
 
+## Understanding Agent Behavior
+
+Use the interactive trace notebooks to inspect why actions were selected and how beliefs changed.
+
+- `notebooks/trace_viewer_phase1_5.ipynb`
+- `notebooks/trace_viewer_phase2_level2.ipynb`
+
+These notebooks help answer:
+
+- Why did the agent take this action at this step?
+- Which uncertainty is being reduced (epistemic vs pragmatic trade-off)?
+- Which generative model family is currently preferred in Phase 2?
+
 ## Outputs
 
 Scripts print per-episode summaries and save belief plots to:

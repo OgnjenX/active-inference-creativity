@@ -15,7 +15,7 @@ complexity (Occam) penalty.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Literal, TypedDict
+from typing import Any, Dict, List, Literal, TypedDict
 
 import numpy as np
 
@@ -98,6 +98,10 @@ class BaseFamilyModel:
 
     def set_transfer_state(self, state: Dict[str, np.ndarray]) -> None:
         """Import state from transfer learning."""
+        raise NotImplementedError
+
+    def belief_snapshot(self) -> Dict[str, np.ndarray]:
+        """Return a lightweight belief snapshot for tracing."""
         raise NotImplementedError
 
 
@@ -228,6 +232,15 @@ class FlatModelFamily(BaseFamilyModel):
         self.beta_reach = state["beta_reach"].copy()
         self.alpha_climb = state["alpha_climb"].copy()
         self.beta_climb = state["beta_climb"].copy()
+
+    def belief_snapshot(self) -> Dict[str, np.ndarray]:
+        p_reach = self.alpha_reach / (self.alpha_reach + self.beta_reach)
+        p_climb = self.alpha_climb / (self.alpha_climb + self.beta_climb)
+        return {
+            "q_height": self.q_height.copy(),
+            "p_reach_obj": p_reach.copy(),
+            "p_climb_obj": p_climb.copy(),
+        }
 
 
 class FactorizedModelFamily(BaseFamilyModel):
@@ -394,6 +407,15 @@ class FactorizedModelFamily(BaseFamilyModel):
         self.beta_gain_type = state["beta_gain_type"].copy()
         self.q_object_type = state["q_object_type"].copy()
 
+    def belief_snapshot(self) -> Dict[str, np.ndarray]:
+        p_success, p_gain = self._type_means()
+        return {
+            "q_height": self.q_height.copy(),
+            "q_object_type": self.q_object_type.copy(),
+            "p_success_type": p_success.copy(),
+            "p_gain_type": p_gain.copy(),
+        }
+
 
 @dataclass
 class StepLogPhase2:
@@ -429,6 +451,7 @@ class EpisodeResultPhase2(TypedDict):
     complexity_factorized: float
     model_posterior_final: np.ndarray
     selected_family_final: str
+    trace: List[Dict[str, Any]]
 
 
 class ActiveInferenceStructureLearningAgent:
@@ -543,44 +566,135 @@ class ActiveInferenceStructureLearningAgent:
             "complexity_factorized": float(self.model_complexity[1]),
         }
 
-    def rollout_episode(self, world, max_steps: int = 8) -> EpisodeResultPhase2:
+    def _create_step_log(
+        self,
+        step_idx: int,
+        action: int,
+        obs_yes: int,
+        obs_climb_success: int,
+        decision: ActDecision,
+        post: Dict[str, float],
+    ) -> StepLogPhase2:
+        """Create log entry for a single step."""
+        terms = decision["terms"]
+        return StepLogPhase2(
+            step=step_idx,
+            action=PHASE2_ACTION_NAMES[action],
+            can_reach_obs="yes" if obs_yes == 1 else "no",
+            climb_result_obs="success" if obs_climb_success == 1 else "fail",
+            selected_family=str(decision["selected_family"]),
+            model_post_flat=float(post["post_flat"]),
+            model_post_factorized=float(post["post_factorized"]),
+            g_flat_do_nothing=float(terms["flat"][0]["G"]),
+            g_flat_obj1=float(terms["flat"][1]["G"]),
+            g_flat_obj2=float(terms["flat"][2]["G"]),
+            g_factor_do_nothing=float(terms["factorized"][0]["G"]),
+            g_factor_obj1=float(terms["factorized"][1]["G"]),
+            g_factor_obj2=float(terms["factorized"][2]["G"]),
+            fe_inc_flat=float(post["fe_flat"]),
+            fe_inc_factorized=float(post["fe_factorized"]),
+            complexity_flat=float(post["complexity_flat"]),
+            complexity_factorized=float(post["complexity_factorized"]),
+        )
+
+    def _create_trace_entry(
+        self,
+        step_idx: int,
+        action: int,
+        obs_yes: int,
+        obs_climb_success: int,
+        decision: ActDecision,
+        post: Dict[str, float],
+        info: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Create trace entry for a single step."""
+        selected = str(decision["selected_family"])
+        selected_terms = decision["terms"][selected]
+        fe_cum_flat = float(self.model_cumulative_fe[0])
+        fe_cum_factorized = float(self.model_cumulative_fe[1])
+        score_cum_flat = float(fe_cum_flat + self.model_complexity[0])
+        score_cum_factorized = float(fe_cum_factorized + self.model_complexity[1])
+        return {
+            "t": int(step_idx),
+            "action": PHASE2_ACTION_NAMES[action],
+            "chosen_action": int(action),
+            "observation": {
+                "can_reach": "yes" if obs_yes == 1 else "no",
+                "climb_result": "success" if obs_climb_success == 1 else "fail",
+            },
+            "q_height": self.families[selected].belief_snapshot()["q_height"].copy(),
+            "efe_per_action": np.array(
+                [selected_terms[0]["G"], selected_terms[1]["G"], selected_terms[2]["G"]],
+                dtype=float,
+            ),
+            "pragmatic_per_action": np.array(
+                [
+                    selected_terms[0]["pragmatic"],
+                    selected_terms[1]["pragmatic"],
+                    selected_terms[2]["pragmatic"],
+                ],
+                dtype=float,
+            ),
+            "epistemic_per_action": np.array(
+                [
+                    selected_terms[0]["epistemic"],
+                    selected_terms[1]["epistemic"],
+                    selected_terms[2]["epistemic"],
+                ],
+                dtype=float,
+            ),
+            "model_family_posterior": self.model_posterior.copy(),
+            "selected_family": selected,
+            "fe_inc_flat": float(post["fe_flat"]),
+            "fe_inc_factorized": float(post["fe_factorized"]),
+            "fe_cum_flat": fe_cum_flat,
+            "fe_cum_factorized": fe_cum_factorized,
+            "complexity_flat": float(post["complexity_flat"]),
+            "complexity_factorized": float(post["complexity_factorized"]),
+            "score_cum_flat": score_cum_flat,
+            "score_cum_factorized": score_cum_factorized,
+            # Backward-compatible aliases for existing notebooks/scripts.
+            "fe_step_flat": float(post["fe_flat"]),
+            "fe_step_factorized": float(post["fe_factorized"]),
+            "score_flat": score_cum_flat,
+            "score_factorized": score_cum_factorized,
+            "beliefs_flat": self.families["flat"].belief_snapshot(),
+            "beliefs_factorized": self.families["factorized"].belief_snapshot(),
+            "C": self.c_pref.copy(),
+            "world_info": dict(info),
+        }
+
+    def rollout_episode(
+        self, world, max_steps: int = 8, enable_trace: bool = False
+    ) -> EpisodeResultPhase2:
         """Run complete episode and return results."""
         self.reset_episode()
         world.reset()
 
         logs: List[StepLogPhase2] = []
+        trace: List[Dict[str, Any]] = []
         success_step = None
 
         for step_idx in range(max_steps):
             decision = self.act()
             action = int(decision["action"])
-            obs, done, _ = world.step(action)
+            obs, done, info = world.step(action)
             obs_yes = int(obs["can_reach"])
             obs_climb_success = int(obs.get("climb_result", 0))
             post = self.update(action=action, obs_yes=obs_yes, obs_climb_success=obs_climb_success)
 
-            terms = decision["terms"]
             logs.append(
-                StepLogPhase2(
-                    step=step_idx,
-                    action=PHASE2_ACTION_NAMES[action],
-                    can_reach_obs="yes" if obs_yes == 1 else "no",
-                    climb_result_obs="success" if obs_climb_success == 1 else "fail",
-                    selected_family=str(decision["selected_family"]),
-                    model_post_flat=float(post["post_flat"]),
-                    model_post_factorized=float(post["post_factorized"]),
-                    g_flat_do_nothing=float(terms["flat"][0]["G"]),
-                    g_flat_obj1=float(terms["flat"][1]["G"]),
-                    g_flat_obj2=float(terms["flat"][2]["G"]),
-                    g_factor_do_nothing=float(terms["factorized"][0]["G"]),
-                    g_factor_obj1=float(terms["factorized"][1]["G"]),
-                    g_factor_obj2=float(terms["factorized"][2]["G"]),
-                    fe_inc_flat=float(post["fe_flat"]),
-                    fe_inc_factorized=float(post["fe_factorized"]),
-                    complexity_flat=float(post["complexity_flat"]),
-                    complexity_factorized=float(post["complexity_factorized"]),
+                self._create_step_log(
+                    step_idx, action, obs_yes, obs_climb_success, decision, post
                 )
             )
+
+            if enable_trace:
+                trace.append(
+                    self._create_trace_entry(
+                        step_idx, action, obs_yes, obs_climb_success, decision, post, info
+                    )
+                )
 
             if done:
                 success_step = step_idx + 1
@@ -597,6 +711,7 @@ class ActiveInferenceStructureLearningAgent:
             "complexity_factorized": float(self.model_complexity[1]),
             "model_posterior_final": self.model_posterior.copy(),
             "selected_family_final": final_name,
+            "trace": trace,
         }
 
     def export_transfer_state(self) -> TransferState:
