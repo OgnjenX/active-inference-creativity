@@ -1,0 +1,31 @@
+{
+  "name": "phase3_train_world",
+  "target_height": 2,
+  "resample_assignment_each_episode": false,
+  "objects": [
+    {
+      "object_id": 1,
+      "name": "object_alpha",
+      "success_prob": 0.88,
+      "gain_prob": 0.92
+    },
+    {
+      "object_id": 2,
+      "name": "object_beta",
+      "success_prob": 0.82,
+      "gain_prob": 0.85
+    },
+    {
+      "object_id": 3,
+      "name": "object_gamma",
+      "success_prob": 0.84,
+      "gain_prob": 0.12
+    },
+    {
+      "object_id": 4,
+      "name": "object_delta",
+      "success_prob": 0.77,
+      "gain_prob": 0.08
+    }
+  ]
+}

@@ -383,3 +383,165 @@ def plot_phase2_transfer_steps(
     plt.savefig(out_path)
     plt.close()
     return True
+
+
+def summarize_phase3_runs(run_outputs: List[Dict]) -> Dict[str, float]:
+    """Compute aggregate metrics for Phase 3 latent-slot experiments."""
+    if not run_outputs:
+        return {
+            "success_rate": 0.0,
+            "avg_steps_to_success": 0.0,
+            "avg_prediction_error": 0.0,
+            "avg_exploratory_actions": 0.0,
+            "avg_exploitative_actions": 0.0,
+            "reserve_slot_dominance_rate": 0.0,
+            "avg_slot_kl_max": 0.0,
+            "avg_object_slot_entropy": 0.0,
+        }
+
+    success_rate = sum(1 for r in run_outputs if r["success"]) / max(len(run_outputs), 1)
+    avg_steps = mean(float(r["steps_to_success"]) for r in run_outputs)
+    avg_pe = mean(float(r.get("avg_prediction_error", 0.0)) for r in run_outputs)
+    avg_exploratory = mean(float(r.get("exploratory_actions", 0.0)) for r in run_outputs)
+    avg_exploitative = mean(float(r.get("exploitative_actions", 0.0)) for r in run_outputs)
+    dominance_rate = (
+        sum(1 for r in run_outputs if bool(r.get("reserve_slot_became_dominant", False)))
+        / max(len(run_outputs), 1)
+    )
+
+    slot_kl_max = []
+    object_entropies = []
+    for r in run_outputs:
+        vals = r.get("final_slot_kl_per_slot")
+        if vals is None:
+            continue
+        arr = [float(v) for v in vals]
+        if arr:
+            slot_kl_max.append(max(arr))
+        ent = r.get("final_slot_entropy_per_object")
+        if ent is not None:
+            ent_arr = [float(v) for v in ent]
+            if ent_arr:
+                object_entropies.append(sum(ent_arr) / len(ent_arr))
+    avg_slot_kl_max = mean(slot_kl_max) if slot_kl_max else 0.0
+    avg_obj_entropy = mean(object_entropies) if object_entropies else 0.0
+
+    return {
+        "success_rate": float(success_rate),
+        "avg_steps_to_success": float(avg_steps),
+        "avg_prediction_error": float(avg_pe),
+        "avg_exploratory_actions": float(avg_exploratory),
+        "avg_exploitative_actions": float(avg_exploitative),
+        "reserve_slot_dominance_rate": float(dominance_rate),
+        "avg_slot_kl_max": float(avg_slot_kl_max),
+        "avg_object_slot_entropy": float(avg_obj_entropy),
+    }
+
+
+def plot_phase3_prediction_error(run_outputs: List[Dict], out_path: str, title: str) -> bool:
+    """Plot average stepwise prediction error per episode."""
+    try:
+        import matplotlib.pyplot as plt  # pylint: disable=import-outside-toplevel
+    except ModuleNotFoundError:
+        print(_MATPLOTLIB_MISSING_MSG)
+        return False
+
+    x = list(range(1, len(run_outputs) + 1))
+    y = [float(r.get("avg_prediction_error", 0.0)) for r in run_outputs]
+
+    plt.figure(figsize=(8, 4.5))
+    plt.plot(x, y, label="avg prediction error")
+    plt.xlabel("Episode")
+    plt.ylabel("Negative log likelihood")
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+    return True
+
+
+def plot_phase3_slot_specialization(run_outputs: List[Dict], out_path: str, title: str) -> bool:
+    """Plot max slot KL-to-uniform per episode (higher means sharper slot)."""
+    try:
+        import matplotlib.pyplot as plt  # pylint: disable=import-outside-toplevel
+    except ModuleNotFoundError:
+        print(_MATPLOTLIB_MISSING_MSG)
+        return False
+
+    x = list(range(1, len(run_outputs) + 1))
+    y = []
+    for run in run_outputs:
+        vals = run.get("final_slot_kl_per_slot")
+        if vals is None:
+            y.append(0.0)
+            continue
+        arr = [float(v) for v in vals]
+        y.append(max(arr) if arr else 0.0)
+
+    plt.figure(figsize=(8, 4.5))
+    plt.plot(x, y, label="max slot KL to uniform")
+    plt.xlabel("Episode")
+    plt.ylabel("KL")
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+    return True
+
+
+def plot_phase3_dominance_rate(run_outputs: List[Dict], out_path: str, title: str) -> bool:
+    """Plot cumulative rate of reserve-slot dominance over episodes."""
+    try:
+        import matplotlib.pyplot as plt  # pylint: disable=import-outside-toplevel
+    except ModuleNotFoundError:
+        print(_MATPLOTLIB_MISSING_MSG)
+        return False
+
+    x = list(range(1, len(run_outputs) + 1))
+    flags = [1.0 if bool(r.get("reserve_slot_became_dominant", False)) else 0.0 for r in run_outputs]
+    cum = []
+    running = 0.0
+    for i, f in enumerate(flags, start=1):
+        running += f
+        cum.append(running / float(i))
+
+    plt.figure(figsize=(8, 4.5))
+    plt.plot(x, cum, label="cumulative reserve dominance rate")
+    plt.xlabel("Episode")
+    plt.ylabel("Rate")
+    plt.ylim(0.0, 1.0)
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+    return True
+
+
+def plot_phase3_transfer_comparison(
+    transferred_runs: List[Dict], fresh_runs: List[Dict], out_path: str, title: str
+) -> bool:
+    """Plot exploratory actions per episode for transferred vs fresh agents."""
+    try:
+        import matplotlib.pyplot as plt  # pylint: disable=import-outside-toplevel
+    except ModuleNotFoundError:
+        print(_MATPLOTLIB_MISSING_MSG)
+        return False
+
+    x = list(range(1, max(len(transferred_runs), len(fresh_runs)) + 1))
+    y_t = [float(r.get("exploratory_actions", 0.0)) for r in transferred_runs]
+    y_f = [float(r.get("exploratory_actions", 0.0)) for r in fresh_runs]
+
+    plt.figure(figsize=(8, 4.5))
+    plt.plot(x[: len(y_t)], y_t, label="transferred exploratory actions")
+    plt.plot(x[: len(y_f)], y_f, label="fresh exploratory actions")
+    plt.xlabel("Episode")
+    plt.ylabel("Exploratory actions")
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+    return True

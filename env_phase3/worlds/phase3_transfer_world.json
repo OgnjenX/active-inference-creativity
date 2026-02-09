@@ -1,0 +1,31 @@
+{
+  "name": "phase3_transfer_world",
+  "target_height": 2,
+  "resample_assignment_each_episode": true,
+  "objects": [
+    {
+      "object_id": 11,
+      "name": "object_nova",
+      "success_prob": 0.86,
+      "gain_prob": 0.88
+    },
+    {
+      "object_id": 12,
+      "name": "object_orbit",
+      "success_prob": 0.81,
+      "gain_prob": 0.78
+    },
+    {
+      "object_id": 13,
+      "name": "object_quartz",
+      "success_prob": 0.85,
+      "gain_prob": 0.16
+    },
+    {
+      "object_id": 14,
+      "name": "object_rift",
+      "success_prob": 0.75,
+      "gain_prob": 0.10
+    }
+  ]
+}

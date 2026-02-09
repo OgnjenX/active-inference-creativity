@@ -1,0 +1,32 @@
+{
+  "name": "phase3_no_structure_world",
+  "target_height": 2,
+  "resample_assignment_each_episode": false,
+  "randomize_outcomes_each_step": true,
+  "objects": [
+    {
+      "object_id": 21,
+      "name": "object_noise_1",
+      "success_prob": 0.5,
+      "gain_prob": 0.5
+    },
+    {
+      "object_id": 22,
+      "name": "object_noise_2",
+      "success_prob": 0.5,
+      "gain_prob": 0.5
+    },
+    {
+      "object_id": 23,
+      "name": "object_noise_3",
+      "success_prob": 0.5,
+      "gain_prob": 0.5
+    },
+    {
+      "object_id": 24,
+      "name": "object_noise_4",
+      "success_prob": 0.5,
+      "gain_prob": 0.5
+    }
+  ]
+}
