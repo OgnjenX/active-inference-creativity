@@ -16,6 +16,24 @@ def run_model_selection_sanity(
     unstructured_world: str = "env_phase2/worlds/phase2_symmetric_world.json",
     occam_scale: float = 0.1,
 ):
+    """Run model-selection sanity checks.
+
+    Runs multiple episodes in a structured and an unstructured world using
+    an ActiveInferenceStructureLearningAgent, summarizes results, and
+    saves model-posterior plots to `experiments/results`.
+
+    Args:
+        episodes: Number of episodes to run per condition.
+        max_steps: Maximum steps per episode.
+        structured_world: Path to the structured-world JSON file.
+        unstructured_world: Path to the unstructured-world JSON file.
+        occam_scale: Scale for Occam's penalty in model comparison.
+
+    Returns:
+        A dict mapping condition labels ("structured", "unstructured") to
+        lists of run results produced by `agent.rollout_episode`.
+    """
+
     results = {}
     for label, path, seed in (
         ("structured", structured_world, 31),
